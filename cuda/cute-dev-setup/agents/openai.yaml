@@ -1,0 +1,4 @@
+interface:
+  display_name: "CuTe/CUTLASS Dev Setup"
+  short_description: "Configure CUTLASS CuTe dev env with VSCode"
+  default_prompt: "Use $cute-dev-setup to set up a CuTe (CUTLASS) development environment with dependency checks, a compile script, and VSCode IntelliSense config."

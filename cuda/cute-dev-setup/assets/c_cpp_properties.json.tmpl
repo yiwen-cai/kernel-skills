@@ -1,0 +1,34 @@
+{
+    "configurations": [
+        {
+            "name": "CUDA",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/cutlass/include",
+                "__CUDA_INCLUDE__",
+                "__CUDA_INCLUDE__/cuda/std",
+                "__CUDA_TARGETS_INCLUDE__",
+                "__GCC_CXX_INCLUDE__",
+                "__GCC_PLATFORM_INCLUDE__",
+                "__GCC_CXX_BACKWARD__",
+                "__GCC_LIBGCC_INCLUDE__",
+                "/usr/local/include",
+                "/usr/include/x86_64-linux-gnu",
+                "/usr/include"
+            ],
+            "defines": [
+                "__CUDACC__",
+                "__x86_64__",
+                "__CUDACC_VER_MAJOR__=__CUDA_MAJOR__",
+                "__CUDACC_VER_MINOR__=__CUDA_MINOR__",
+                "__CUDACC_VER_BUILD__=__CUDA_BUILD__"
+            ],
+            "compilerPath": "__GCC_BIN__",
+            "compilerArgs": ["-std=c++17"],
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
