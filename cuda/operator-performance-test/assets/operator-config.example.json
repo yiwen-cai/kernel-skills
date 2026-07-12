@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "operation": "OP_NAME",
+  "binary_source": "perf/bench_OP_NAME.cu",
+  "quick_cases": ["quick-small", "quick-large"],
+  "full_cases": ["small", "medium", "large", "xlarge"],
+  "representative_case": "representative",
+  "variants": ["candidate", "reference"],
+  "default_variant": "candidate",
+  "reference_variant": "reference",
+  "dtype": "SET_ME",
+  "compute_mode": "SET_ME",
+  "algorithm_flops": "SET_FORMULA",
+  "algorithm_bytes": "SET_MINIMUM_BYTES_FORMULA",
+  "cache_mode": "warm-cache",
+  "threshold": {
+    "relative_percent": 5.0,
+    "absolute_us": 0.2
+  }
+}

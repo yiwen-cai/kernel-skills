@@ -1,0 +1,4 @@
+interface:
+  display_name: "Operator Performance Test"
+  short_description: "标准化 CUDA 算子 Quick/Full 性能测试工作流"
+  default_prompt: "Use $operator-performance-test to profile and report this CUDA operator with the fixed Quick/Full workflow."

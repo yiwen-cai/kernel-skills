@@ -8,7 +8,8 @@ GPU kernel 开发相关的 Claude Code / Codex skill 集合。按编程模型分
 kernel-skills/
 ├── cuda/                            # NVIDIA CUDA 相关 skill
 │   ├── cute-dev-setup/              # 配置 CUTLASS/CuTe 开发环境
-│   └── operator-accuracy-test/      # 算子精度测试（数值对拍）标准流程
+│   ├── operator-accuracy-test/      # 算子精度测试（数值对拍）标准流程
+│   └── operator-performance-test/   # 算子 Quick/Full 性能测试标准流程
 ├── triton/                          # Triton 相关 skill（占位）
 └── npu/                             # 国产 NPU（昇腾等）相关 skill（占位）
 ```
@@ -39,6 +40,20 @@ kernel-skills/
 
 适用范围：sm_120（Blackwell），第一阶段数值误差对拍（稳定性/跨硬件留扩展点）。
 
+### [cuda/operator-performance-test](cuda/operator-performance-test)
+
+为 CUDA/CuTe 算子建立可持续的 **Quick/Full 性能测试标准流程**。Quick 使用 CUDA Event 提供延迟统计、MFU/MBU、analytical Roofline、reference speedup 和命名基线回归判断；Full 运行固定分层 case，并用 NSYS/NCU 深入分析一个预先配置的代表 case。
+
+包含：
+- **Quick/Full 执行契约** — 正确性 gate、warmup/自动 batching、median/P10/P90/min、固定 case 分层与代表 case profiling
+- **指标语义** — 区分 MFU/MBU/analytical Roofline 派生估算和 NCU 硬件计数器实测结论
+- **命名基线与回归门禁** — 显式 create/update、Git 可追踪，默认 `>5%` 且 `>0.2 us`，连续两次命中才判定回归
+- **安全的 NCU 权限流程** — Full 只交互认证一次，不保存密码，结束后清除 sudo ticket
+- **状态与报告规范** — `PASS`、`REGRESSION`、`UNSTABLE`、`PROFILE_PARTIAL`、`INVALID`，以及 JSON/Markdown/manifest 产物约定
+- **SOP 与算子配置模板** — 可复制到项目中扩展新算子
+
+当前经 GPU 0、Blackwell CC 12.0、vecAdd 端到端验证；其他 GPU/架构需要显式扩展和重新校准。
+
 ## 使用方式
 
 这些 skill 是给 [Claude Code](https://claude.com/claude-code) 用的。两种用法：
@@ -51,6 +66,7 @@ kernel-skills/
 git clone https://github.com/yiwen-cai/kernel-skills.git
 cp -r kernel-skills/cuda/cute-dev-setup ~/.claude/skills/
 cp -r kernel-skills/cuda/operator-accuracy-test ~/.claude/skills/
+cp -r kernel-skills/cuda/operator-performance-test ~/.claude/skills/
 ```
 
 **手动用脚本/模板**：skill 目录里的 `assets/` 可以脱离 Claude Code 单独使用，比如直接拷 `new_accuracy_test.sh` 生成测试骨架、拷 `SOP.md.tmpl` 落地项目 SOP。

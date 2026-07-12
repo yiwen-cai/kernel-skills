@@ -1,0 +1,42 @@
+# Performance testing SOP
+
+Target: physical GPU 0, Blackwell CC 12.0.
+
+## Entrypoints
+
+```bash
+./perf.sh quick <op>
+./perf.sh quick <op> --baseline <name>
+./perf.sh full <op> --baseline <name>
+./perf.sh baseline create <name> <op> --from <run-id>
+./perf.sh baseline update <name> <op> --from <run-id>
+./perf.sh baseline show <name> <op>
+```
+
+Quick is the source of truth for CUDA Event latency and regression status. Full runs the fixed case matrix and profiles only the configured representative case.
+
+## Operator definitions
+
+- Quick cases: `<small>`, `<large>`
+- Full cases: `<fixed tier list>`
+- Representative case: `<case>`
+- Variants/reference: `<variants>`
+- Algorithm FLOPs: `<formula>`
+- Algorithm minimum bytes: `<formula>`
+- Peak compute/bandwidth source: `<source>`
+
+## Gates
+
+- Correctness must pass before timing.
+- Regression requires both `>5%` relative and `>0.2 us` absolute slowdown, confirmed twice.
+- Missing baselines are reported and never auto-created.
+- Active compute processes, failed GPU-state queries or temperature `>=85 C` produce `UNSTABLE`.
+- Profiler failures produce `PROFILE_PARTIAL` while retaining benchmark results.
+
+## Privilege policy
+
+Authenticate once with `sudo -v`; use privilege only for NCU and ownership repair; keep the ticket alive during Full; clear it with `sudo -k`. Never store or pipe a password.
+
+## Artifacts
+
+Track JSON/Markdown reports and named baselines. Ignore raw Nsight reports, profiler SQLite files and build outputs. Record reproduction commands and environment/source identity in every run.
