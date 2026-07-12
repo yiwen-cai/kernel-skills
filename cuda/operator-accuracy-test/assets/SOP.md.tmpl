@@ -1,0 +1,211 @@
+# 算子精度测试 SOP
+
+> 每写完一个新算子（或改动已有算子的数值逻辑），按本 SOP 跑一遍精度验证，确认 GPU 输出与 reference 的数值差异在阈值内。
+>
+> **适用范围**：仅 Blackwell（sm_120）。A800（sm_80）不在本 SOP 范围内（跨硬件一致性见第 12 节扩展点）。
+> **阶段**：第一阶段 = 数值误差对拍。数值稳定性、跨硬件一致性留扩展点，暂不实现。
+>
+> _本文件由 operator-accuracy-test skill 提供，复制到项目根作为该项目的 SOP。按项目实际算子调整第 6 节边界 case 清单。_
+
+---
+
+## 1. 文件组织与 kernel 同步机制
+
+每个算子拆成两个文件，**禁止复制粘贴 kernel**：
+
+| 文件 | 内容 |
+|---|---|
+| `<op>.cu` | host 端：main、launch、运行验证 |
+| `kernel_<op>.cuh` | kernel 定义（`__global__` 函数体 + device helper） |
+
+`kernel_<op>.cuh` 的范式（对齐 `cutlass/examples/51_hopper_gett/gett_kernel.cuh`）：
+
+```cpp
+#pragma once
+#include <cuda_runtime.h>
+#include "cute/tensor.hpp"
+
+namespace <op> {
+template <...>
+__global__ void kernelName(...) {
+  using namespace cute;   // 放函数体内，不放文件作用域
+  ...
+}
+
+// 非模板 kernel 必须加 inline，否则多 TU include 会 ODR 冲突
+inline __global__ void nonTemplateKernel(...) { ... }
+}  // namespace <op>
+```
+
+要点：
+- **自包含**：.cuh 开头 include 所有依赖头文件
+- **`#pragma once`** 防重复包含
+- **`namespace <op> {}`** 包裹，避免跨算子符号冲突
+- **`using namespace cute;` 放函数体内**（不放文件作用域，否则污染所有 include 该 .cuh 的 .cu）
+- **模板 kernel** 跨 TU include 安全（nvcc 默认 `-static-global-template-stub=true`）
+- **非模板 `__global__`** 必须加 `inline`（nvcc 文档 §6.6.5）
+- 测试文件 `#include "kernel_<op>.cuh"` 直接调用 `<op>::kernelName<...>(...)`
+
+参照范例：[assets/kernel_vecAdd.example.cuh](assets/kernel_vecAdd.example.cuh)
+
+---
+
+## 2. reference 选型
+
+| 算子类型 | reference | 说明 |
+|---|---|---|
+| gemm | cuBLAS（`cublasSgemm`） | **必须强制 PEDANTIC_MATH 禁用 TF32**（见下） |
+| 其他（vecAdd/softmax/transpose/reduce/attention） | 手写 host fp32 朴素实现 | 零依赖、透明、贴合 cc.sh |
+
+**reference 必须用 fp32 计算**。若算子本身是 BF16/FP8，reference 仍 upcast 到 fp32（对齐 xformers/FlashAttention）。cutlass 类型都支持隐式 `operator float()`，reference 里直接 `(float)x`。
+
+### cuBLAS reference 完整片段（gemm 专用）
+
+> ⚠️ sm_120 上 cuBLAS 默认 `CUBLAS_DEFAULT_MATH`（TF32 on），不显式禁用会让 reference 走 TF32（10-bit mantissa）污染基准，整个 gemm 精度测试失效。**必须照抄以下 SetMathMode 步骤**。
+
+```cpp
+#include <cublas_v2.h>
+
+cublasHandle_t handle;
+cublasCreate(&handle);
+cublasSetMathMode(handle, CUBLAS_PEDANTIC_MATH);  // 禁用 TF32，纯 IEEE FP32
+
+// row-major A(M,K) @ B(K,N) = C(M,N) 等价于 col-major C^T(N,M) = B^T(N,K) @ A^T(K,M)
+float alpha = 1.0f, beta = 0.0f;
+cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+            N, M, K, &alpha,
+            B, N, A, K, &beta, C, N);
+
+cublasDestroy(handle);
+```
+
+替代：环境变量 `NVIDIA_TF32_OVERRIDE=0` 也能全局禁用 TF32（cuBLAS 12.8 §2.2.11），但推荐代码内显式 SetMathMode。编译需 link：`-lcublas`。
+
+事实依据见 [references/tolerance-and-tf32.md](references/tolerance-and-tf32.md)。
+
+---
+
+## 3. 多 dtype 容差表
+
+判定公式（对齐 PyTorch 2.12 `torch.testing.assert_close`）：
+
+```
+|got[i] - expected[i]| <= atol + rtol * |expected[i]|
+```
+
+分母是 `expected`（参考值），不是 `got`。
+
+| dtype | 算子类型 | rtol | atol | 来源 |
+|---|---|---|---|---|
+| float32 | reduction 类（softmax/gemm/reduce/attention） | 1.3e-6 | 1e-5 | PyTorch 2.12 |
+| float32 | bit-exact 类（vecAdd/transpose） | 0 | 0 | 逐元素无误差 |
+| bfloat16 | 任意 | 1.6e-2 | 1e-5 | PyTorch 2.12 |
+| float16 | 任意 | 1e-3 | 1e-5 | PyTorch 2.12 |
+| float_e4m3_t (FP8) | 任意 | 0 | 0.125 | Triton tutorial |
+| float_e5m2_t (FP8) | 任意 | 0 | 0.2 | Triton 量级，校准后更新 |
+
+- **bit-exact 类**（搬运/重排/逐元素）：用 0/0，任何偏差都是 bug
+- **reduction 类**（max/exp/sum/累加）：浮点累加顺序差异导致 bit 不等价，用 PyTorch 默认容差
+- FP8 容差远松（3-4 位有效数字），随算子校准后更新
+
+---
+
+## 4. reference upcast 策略
+
+BF16/FP8 算子的 reference **必须用 fp32 计算**：先 `(float)x` upcast，fp32 朴素计算，结果作 expected。不要用 cuBLAS 的 bf16/fp8 接口当 reference（它们自己也有舍入）。
+
+---
+
+## 5. 测试输入
+
+每个算子至少三类输入，**固定随机种子 `srand(42)`** 保证可复现：
+
+1. **随机均匀分布**（`fillUniform`）—— happy path，按 dtype 限幅
+2. **随机正态分布**（`fillNormal`，Box-Muller）—— softmax 等对分布敏感的算子
+3. **边界 case**（按算子定制）—— 见第 6 节
+
+按 dtype 限幅（防 from_float saturate 或 NaN）：
+- float_e4m3_t：[-448, 448]，**无 Inf**（0x7f = NaN）
+- float_e5m2_t：有 Inf，建议限幅 [-57344, 57344]
+- bfloat16/float16：与 fp32 同动态范围，一般无需限幅
+
+---
+
+## 6. 按算子的边界 case 清单
+
+> _按项目实际算子增删。边界 case 的"正确行为"必须预先约定，避免"GPU 和 reference 都合理但不一致"的争议。_
+
+- **vecAdd**：长度非 2 的幂（如 1000）、长度 < BLOCK_SIZE（如 100）、长度 = GRID_SIZE*BLOCK_SIZE 边界（如 1024）
+- **softmax**：全相同值、N < BLOCK_SIZE、全 -inf（产出 NaN，约定 expected 也是 NaN，用 `equal_nan=true`）、大数值差异（测 max-subtraction）
+- **gemm**：M/N/K 非对齐（如 100×50×80）、K 很大（测累加误差累积）、含 0 行/列
+- **transpose**：非方阵（如 31×67）、行向量（1×128）、列向量（128×1）
+- **reduce**：空数组（**约定返回 0**，对齐 numpy.nansum）、全相同值、单元素
+
+---
+
+## 7. 误差度量与判定
+
+同时报告：
+
+| 指标 | 含义 |
+|---|---|
+| `max_abs_err` | max \|got[i] - expected[i]\] — 判定主指标 |
+| `max_rel_err` | max \|got-exp\| / (\|exp\| + 1e-12) — 加 epsilon 防除零 |
+| `mismatch_count` / `total` | 超阈值元素数 / 总数 |
+| `argmax_idx` | 最大绝对误差位置 — 调试关键 |
+
+判定：`mismatch_count == 0` 则 PASS，否则 FAIL。
+
+---
+
+## 8. NaN / Inf 处理
+
+- 默认 `equal_nan = false`（对齐 PyTorch）：含 NaN 的元素直接判 mismatch（IEEE 754 下 NaN != NaN）
+- **例外 1**：预先约定"产出 NaN 是正确行为"的 case（如 softmax 全 -inf），用 `equal_nan = true`
+- **例外 2（搬运类）**：transpose/vecAdd 这类纯搬运算子搬运含 NaN 的输入时，输出也应是 NaN。但 `equal_nan=false` 下 NaN!=NaN 会误判 FAIL。这类 case 要么用 `equal_nan=true`，要么约定测试输入不含 NaN
+- Inf/-Inf：必须**精确相等**（同符号同位置），不受 tolerance 和 equal_nan 影响
+
+---
+
+## 9. 退出码语义
+
+- 所有 case 通过 → `return 0`
+- 任一 case 失败 → `return 1`
+- **禁止恒返回 0**（CI/脚本无法判定成败）
+
+---
+
+## 10. 报告格式
+
+对齐 PyTorch `assert_close` 错误信息风格：
+
+```
+[PASS] vecAdd/random_uniform  max_abs=0.0e+00 max_rel=0.0e+00 mismatch=0/1000 (at idx -1)
+[FAIL] vecAdd/n_lt_blocksize   max_abs=2.3e+00 max_rel=1.0e+00 mismatch=5/100 (at idx 3)
+  mismatch[0]: idx=3  got=1.5000  expected=3.0000
+  ...
+Total: 2 passed, 1 failed
+```
+
+失败时打印前 5 个 mismatch 的 (idx, got, expected)。
+
+---
+
+## 11. 脚手架
+
+`./new_accuracy_test.sh <op>` 生成 `test_<op>.cu` 骨架，含：
+- `#include "kernel_<op>.cuh"`
+- 模板化 `compareArrays<T>`（内部 `(float)got[i]` upcast，第 7 节公式，NaN 处理，argmax）
+- `tolerance_for(dtype, op_kind)` 查表函数（第 3 节容差表，单一事实来源）
+- `printResult`（第 10 节格式）
+- reference / 输入生成 / run_case 的 TODO 占位
+- main + 退出码语义（第 9 节）
+
+填充 TODO 后 `./cc.sh test_<op>.cu` 编译运行。参照范例：[assets/test_vecAdd.example.cu](assets/test_vecAdd.example.cu)。
+
+---
+
+## 12. 扩展点（第一阶段不实现，结构预留）
+
+- **阶段二：数值稳定性** —— 把第 6 节边界 case 扩展为"破坏性输入遍历器"，检查意外 NaN/Inf/丢精度
+- **阶段三：跨硬件一致性** —— 固定 seed 多卡跑，sm_120 vs sm_80 reduction 差异需单独约定阈值。此阶段把 A800 纳入范围

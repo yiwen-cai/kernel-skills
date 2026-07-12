@@ -6,10 +6,11 @@ GPU kernel 开发相关的 Claude Code / Codex skill 集合。按编程模型分
 
 ```
 kernel-skills/
-├── cuda/                     # NVIDIA CUDA 相关 skill
-│   └── cute-dev-setup/       # 配置 CUTLASS/CuTe 开发环境
-├── triton/                   # Triton 相关 skill（占位）
-└── npu/                      # 国产 NPU（昇腾等）相关 skill（占位）
+├── cuda/                            # NVIDIA CUDA 相关 skill
+│   ├── cute-dev-setup/              # 配置 CUTLASS/CuTe 开发环境
+│   └── operator-accuracy-test/      # 算子精度测试（数值对拍）标准流程
+├── triton/                          # Triton 相关 skill（占位）
+└── npu/                             # 国产 NPU（昇腾等）相关 skill（占位）
 ```
 
 ## 已有 skill
@@ -25,20 +26,34 @@ kernel-skills/
 - **故障排查手册** — 按 nvcc/cc1plus/VSCode 报错关键词查表的诊断指南
 - **最小验证程序** — 确认环境能编译能跑的 hello world
 
+### [cuda/operator-accuracy-test](cuda/operator-accuracy-test)
+
+为手写 CUDA/CuTe 算子落地**精度测试标准流程**（数值对拍）。解决三个痛点：kernel 复制粘贴进测试导致源改测试过期假绿、不知 reference 用什么/容差定多少、gemm 用 cuBLAS 当 reference 被 TF32 静默污染。
+
+包含：
+- **SOP 模板** — 12 节标准流程（reference 选型、多 dtype 容差表、TF32 污染规避、NaN 处理、退出码语义、报告格式、kernel 同步机制、扩展点），复制到项目根即用
+- **测试脚手架脚本** — `./new_accuracy_test.sh <op>` 生成 `test_<op>.cu` 骨架，模板化 `compareArrays<T>`（支持 fp32/bf16/fp16/fp8）+ `tolerance_for` 容差查表 + 对齐 PyTorch 的报告格式 + 退出码语义
+- **.cuh 范式样板** — 对齐 CUTLASS 官方的 kernel 头文件范式（`#pragma once` + namespace + 函数内 using namespace），通过 `#include` 机制杜绝复制粘贴分叉
+- **vecAdd 端到端范例** — 可直接编译运行的三 case 测试（含 .cuh + test.cu），照着改新算子
+- **容差与 TF32 事实依据** — 每个容差值和 TF32 处理附 PyTorch/cuBLAS/nvcc 官方文档出处
+
+适用范围：sm_120（Blackwell），第一阶段数值误差对拍（稳定性/跨硬件留扩展点）。
+
 ## 使用方式
 
 这些 skill 是给 [Claude Code](https://claude.com/claude-code) 用的。两种用法：
 
 **作为 skill 安装**（自动触发）：
 
-把对应 skill 目录拷到 `~/.claude/skills/`，Claude Code 会自动发现。之后说「配置 cute 环境」「.cu 文件报红」等就会触发。
+把对应 skill 目录拷到 `~/.claude/skills/`，Claude Code 会自动发现。之后说「配置 cute 环境」「.cu 文件报红」「给算子写精度测试」等就会触发。
 
 ```bash
 git clone https://github.com/yiwen-cai/kernel-skills.git
 cp -r kernel-skills/cuda/cute-dev-setup ~/.claude/skills/
+cp -r kernel-skills/cuda/operator-accuracy-test ~/.claude/skills/
 ```
 
-**手动用脚本**：skill 目录里的 `scripts/` 和 `assets/` 可以脱离 Claude Code 单独使用，比如直接跑 `check_env.sh` 检测环境。
+**手动用脚本/模板**：skill 目录里的 `assets/` 可以脱离 Claude Code 单独使用，比如直接拷 `new_accuracy_test.sh` 生成测试骨架、拷 `SOP.md.tmpl` 落地项目 SOP。
 
 ## License
 

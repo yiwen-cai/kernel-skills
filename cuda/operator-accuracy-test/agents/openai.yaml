@@ -1,0 +1,4 @@
+interface:
+  display_name: "Operator Accuracy Test"
+  short_description: "Numerical correctness testing for CUDA/CuTe kernels"
+  default_prompt: "Use $operator-accuracy-test to set up a standardized accuracy test (numerical diff against reference) for a CUDA/CuTe operator, with SOP template, test scaffold, and .cuh kernel pattern."
