@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <cuda_runtime.h>
 
-#include "kernel_vecAdd.cuh"
+#include "vecAdd/kernel_vecAdd.cuh"
 
 // ============ TestResult ============
 struct TestResult {

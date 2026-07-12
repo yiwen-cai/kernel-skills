@@ -1,32 +1,32 @@
 #!/bin/bash
 # new_accuracy_test.sh —— 算子精度测试脚手架
 # 用法：./new_accuracy_test.sh <算子名>
-# 产物：test_<算子名>.cu，可直接 ./cc.sh test_<算子名>.cu 编译运行
+# 产物：tests/test_<算子名>.cu，从项目根 ./scripts/cc.sh tests/test_<算子名>.cu 编译运行
 # 按 SOP.md 生成：模板化 compareArrays + tolerance_for 查表 + 占位 TODO
 set -e
 
 OP="${1:?用法: $0 <算子名>}"
-OUT="test_${OP}.cu"
+OUT="tests/test_${OP}.cu"
 
 if [ -f "$OUT" ]; then
   echo "已存在 $OUT，放弃覆盖（如需重新生成请先删除）"; exit 1
 fi
 
-if [ ! -f "kernel_${OP}.cuh" ]; then
-  echo "警告：kernel_${OP}.cuh 不存在，生成的测试文件编译会失败。请先按 SOP 第 1 节创建该文件。"
+if [ ! -f "src/${OP}/kernel_${OP}.cuh" ]; then
+  echo "警告：src/${OP}/kernel_${OP}.cuh 不存在，生成的测试文件编译会失败。请先按 SOP 第 1 节创建该文件。"
 fi
 
 cat > "$OUT" << 'CU_EOF'
 // 精度测试: __OP__
 // 按 SOP.md 生成：reference + 三类输入 + compareArrays + 退出码
-// 填充所有 TODO 后 ./cc.sh test___OP__.cu 编译运行
+// 填充所有 TODO 后 ./scripts/cc.sh tests/test___OP__.cu 编译运行
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
 #include <cstdint>
 #include <cuda_runtime.h>
 
-#include "kernel___OP__.cuh"
+#include "__OP__/kernel___OP__.cuh"
 
 // ============ TestResult ============
 struct TestResult {
@@ -82,16 +82,14 @@ TestResult compareArrays(const char* name,
 }
 
 // ============ 打印结果（对齐 SOP 第 10 节 / PyTorch 格式）============
-// 模板化：支持 cutlass bf16/fp8 类型（内部 upcast float 打印）
-template <class T>
-void printResult(const TestResult& r, const T* got, const T* expected) {
+void printResult(const TestResult& r, const float* got, const float* expected) {
   const char* tag = r.passed ? "PASS" : "FAIL";
   printf("[%s] %s  max_abs=%.3e max_rel=%.3e mismatch=%d/%d (at idx %d)\n",
          tag, r.name, r.max_abs_err, r.max_rel_err, r.mismatch_count, r.total, r.argmax_idx);
   if (!r.passed && got && expected) {
     int shown = 0;
     for (int i = 0; i < r.total && shown < 5; ++i) {
-      float g = (float)got[i], e = (float)expected[i];
+      float g = got[i], e = expected[i];
       float diff = std::fabs(g - e);
       if (diff > 0.0f) {
         printf("  mismatch[%d]: idx=%d  got=%.4f  expected=%.4f\n", shown, i, g, e);
@@ -154,4 +152,4 @@ sed -i "s/__OP__/${OP}/g" "$OUT"
 echo "生成 $OUT"
 echo "下一步："
 echo "  1. 填充 TODO（reference、run_case、各 case）"
-echo "  2. ./cc.sh $OUT 编译运行"
+echo "  2. ./scripts/cc.sh $OUT 编译运行"
