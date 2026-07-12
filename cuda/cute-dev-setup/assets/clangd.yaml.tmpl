@@ -1,0 +1,80 @@
+# CuTe/CUTLASS clangd 配置模板
+# 合并自 NVIDIA 官方 sm_90a 模板，适配 sm_120 + 最小配置 + 全局降噪
+# 参考: https://docs.nvidia.com/cutlass/latest/media/docs/cpp/ide_setup.html
+#
+# 用法：复制到项目根 `.clangd`，按检测结果替换：
+#   - Compiler 路径（默认 /usr/local/cuda/bin/nvcc，软链即可）
+#   --cuda-gpu-arch（sm_120 Blackwell / sm_80 Ampere / sm_90 Hopper）
+#   -D__CUDA_ARCH__（1200 / 800 / 900）
+#   -D__CUDACC_VER_MINOR__（CUDA minor 版本）
+#   -I 的 CUTLASS 三条绝对路径
+#
+# 关键设计决策（踩坑总结）：
+#   1. Diagnostics.Suppress: ["*"] —— 关掉所有诊断，只保留跳转/补全。
+#      理由：clang 对 CUDA SDK 头（cuda_fp16/bf16/fp8.hpp 等）有大量假阳性
+#      （__half、__CUDA_ARCH_HAS_FEATURE__、CUtensorMapDataType ...），逐条 Suppress 不可能追完。
+#      这些假阳性不影响跳转/补全/真编译，全局 suppress 是社区唯一可行解。
+#   2. -D__INTELLISENSE__ -D__CLANGD__ —— 让 CuTe/CUTLASS 头跳过只在真 nvcc 编译时
+#      才需要的代码路径（这两个宏是 NVIDIA 官方推荐的 clangd 适配开关）。
+#   3. --query-driver 必须在 settings.json 的 clangd.arguments 里配（见 settings.json 模板），
+#      否则 Compiler: nvcc 这行会被 clangd 安全机制静默忽略。
+#   4. clangd 需要 >= 19 才认 sm_120（sm_120 支持首发于 LLVM 20，PR #127187）。
+#      Ubuntu 20.04 默认仓库只到 clangd-18，必须加 LLVM PPA 装 22。
+#      若被迫用 clangd-18，在 Remove 里加 "--cuda-gpu-arch=*" 兜底（纯靠 -D__CUDA_ARCH__ 驱动）。
+
+CompileFlags:
+  Compiler: /usr/local/cuda/bin/nvcc
+  Add:
+    # CUDA 工具链
+    - --cuda-path=/usr/local/cuda
+    - --cuda-gpu-arch=sm_120
+    - -I/usr/local/cuda/include
+    - "-xcuda"
+    - "-ferror-limit=0"
+    - "--std=c++17"
+
+    # 让 CuTe/CUTLASS 头跳过只在真 nvcc 编译时才需要的代码路径
+    - "-D__INTELLISENSE__"
+    - "-D__CLANGD__"
+
+    # CUDA 版本对齐（按实际改 MINOR）
+    - "-D__CUDACC_VER_MAJOR__=12"
+    - "-D__CUDACC_VER_MINOR__=8"
+    - "-D_LIBCUDACXX_STD_VER=12"
+
+    # 目标架构（按卡改：sm_120→1200, sm_80→800, sm_90→900）
+    - "-D__CUDA_ARCH__=1200"
+
+    # 降噪
+    - "-Wno-invalid-constexpr"
+
+    # CUTLASS/CuTe include（绝对路径，按实际项目位置改）
+    - -I/__PROJECT__/cutlass/include
+    - -I/__PROJECT__/cutlass/tools/util/include
+    - -I/__PROJECT__/cutlass/examples/common
+
+  Remove:
+    # nvcc 特有、clang frontend 不认的 flag（若用 compile_commands.json 才会碰到）
+    - "-Xfatbin*"
+    - "-gencode*"
+    - "--generate-code*"
+    - "-ccbin*"
+    - "--compiler-options*"
+    - "--expt-extended-lambda"
+    - "--expt-relaxed-constexpr"
+    - "-forward-unknown-to-host-compiler"
+    - "-Werror=cross-execution-space-call"
+    # 兜底: 若 clangd < 19 报 "unsupported CUDA gpu architecture: sm_120"，取消下行注释
+    # - "--cuda-gpu-arch=*"
+
+Hover:
+  ShowAKA: No
+InlayHints:
+  Enabled: No
+
+# 全局关诊断：CUDA SDK 头假阳性无穷无尽，逐条 Suppress 不可行。
+# 只保留跳转/补全（符号索引独立于诊断，不受影响）。
+# 若要恢复诊断，改成具体 code 列表（如 ["variadic_device_fn", "attributes_not_allowed"]）。
+Diagnostics:
+  Suppress:
+    - "*"

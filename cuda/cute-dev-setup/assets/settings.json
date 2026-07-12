@@ -2,5 +2,25 @@
     "files.associations": {
         "*.cu": "cuda-cpp",
         "*.cuh": "cuda-cpp"
+    },
+    "editor.tabSize": 2,
+
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "C_Cpp.autocomplete": "disabled",
+    "C_Cpp.errorSquiggles": "disabled",
+
+    "clangd.use": true,
+    "clangd.path": "/usr/bin/clangd-22",
+    "clangd.onConfigChanged": "restart",
+    "clangd.arguments": [
+        "--background-index",
+        "--query-driver=/usr/local/cuda/bin/nvcc",
+        "--header-insertion=never",
+        "--clang-tidy=false",
+        "-j=32"
+    ],
+    "clangd.diagnostics": {
+        "unusedIncludes": "none",
+        "missingIncludes": "none"
     }
 }
